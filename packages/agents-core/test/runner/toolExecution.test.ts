@@ -2615,6 +2615,55 @@ describe('executeShellActions', () => {
       }
     });
 
+    it('passes the executed tool input to customDataExtractor', async () => {
+      const executedInputs: unknown[] = [];
+      const t = tool({
+        name: 'hi',
+        description: 't',
+        parameters: z.object({
+          name: z.string(),
+          optional: z.string().optional(),
+          withDefault: z.string().default('default-value'),
+        }),
+        execute: vi.fn(async (input) => {
+          executedInputs.push(input);
+          return 'ok';
+        }),
+        customDataExtractor: (context) => ({
+          input: context.input,
+        }),
+      }) as unknown as FunctionTool;
+      const localToolCall = {
+        ...toolCall,
+        callId: 'c_executed_input_custom_data',
+        arguments: JSON.stringify({
+          name: 'alice',
+          optional: null,
+        }),
+      };
+
+      const res = await withTrace('test', () =>
+        executeFunctionToolCalls(
+          state._currentAgent,
+          [{ toolCall: localToolCall, tool: t }],
+          runner,
+          state,
+        ),
+      );
+
+      const expectedInput = {
+        name: 'alice',
+        withDefault: 'default-value',
+      };
+      expect(executedInputs).toEqual([expectedInput]);
+      expect(res[0].type).toBe('function_output');
+      if (res[0].type === 'function_output') {
+        expect(res[0].runItem.customData).toEqual({
+          input: expectedInput,
+        });
+      }
+    });
+
     it('emits a single error end event when customDataExtractor fails', async () => {
       const t = tool({
         name: 'hi',

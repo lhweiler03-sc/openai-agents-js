@@ -27,6 +27,7 @@ import {
   ComputerToolCustomDataContext,
   FunctionToolResult,
   FunctionToolCustomDataContext,
+  FUNCTION_TOOL_PARSED_INPUT_CALLBACK,
   ApplyPatchToolCustomDataContext,
   invokeFunctionTool,
   resolveComputer,
@@ -449,6 +450,7 @@ async function runApprovedFunctionTool<TContext>(
       );
 
       let toolOutput: unknown;
+      let executedInput = parsedInput;
       if (inputGuardrailResult.type === 'reject') {
         toolOutput = inputGuardrailResult.message;
       } else {
@@ -459,6 +461,9 @@ async function runApprovedFunctionTool<TContext>(
         const toolDetails = {
           toolCall: toolRun.toolCall,
           resumeState,
+          [FUNCTION_TOOL_PARSED_INPUT_CALLBACK]: (input: unknown) => {
+            executedInput = cloneForCustomDataContext(input);
+          },
         };
         setAgentToolParentRunConfigOnDetails(
           toolDetails,
@@ -490,7 +495,7 @@ async function runApprovedFunctionTool<TContext>(
           runContext: state._context,
           tool: toolRun.tool,
           toolCall: cloneForCustomDataContext(toolRun.toolCall),
-          input: cloneForCustomDataContext(parsedInput),
+          input: cloneForCustomDataContext(executedInput),
           output: cloneForCustomDataContext(toolOutput),
           rawItem: cloneForCustomDataContext(rawItem),
         } satisfies FunctionToolCustomDataContext<TContext>,

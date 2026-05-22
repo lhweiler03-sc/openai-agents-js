@@ -64,10 +64,15 @@ export type ToolApprovalFunction<TParameters extends ToolInputParameters> = (
   callId?: string,
 ) => Promise<boolean>;
 
+export const FUNCTION_TOOL_PARSED_INPUT_CALLBACK = Symbol(
+  'openai.agents.functionToolParsedInputCallback',
+);
+
 export type ToolCallDetails = {
   toolCall?: protocol.FunctionCallItem;
   resumeState?: string;
   signal?: AbortSignal;
+  [FUNCTION_TOOL_PARSED_INPUT_CALLBACK]?: (input: unknown) => void;
   /**
    * Internal: parent runner config for nested agent-tool runs (Agent.asTool).
    */
@@ -1919,6 +1924,7 @@ export function tool<
       logger.debug(`Invoking tool ${name} with input ${input}`);
     }
 
+    details?.[FUNCTION_TOOL_PARSED_INPUT_CALLBACK]?.(parsed);
     const result = await options.execute(parsed, runContext, details);
     const stringResult = toSmartString(result);
 
