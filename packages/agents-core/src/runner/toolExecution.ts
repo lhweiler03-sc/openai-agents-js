@@ -1291,7 +1291,7 @@ export async function executeComputerActions(
           {
             runContext,
             tool: computerTool,
-            toolCall,
+            toolCall: cloneForCustomDataContext(toolCall),
             output: imageUrl,
             rawItem: cloneForCustomDataContext(rawItem),
           } satisfies ComputerToolCustomDataContext,

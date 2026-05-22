@@ -739,6 +739,64 @@ describe('executeComputerActions', () => {
     expect(end).not.toHaveBeenCalled();
   });
 
+  it('passes a cloned computer tool call to customDataExtractor', async () => {
+    const fakeComputer = {
+      environment: 'mac',
+      dimensions: [1, 1] as [number, number],
+      screenshot: vi.fn().mockResolvedValue('img'),
+      click: vi.fn(),
+      doubleClick: vi.fn(),
+      drag: vi.fn(),
+      keypress: vi.fn(),
+      move: vi.fn(),
+      scroll: vi.fn(),
+      type: vi.fn(),
+      wait: vi.fn(),
+    } as any;
+    const tool = computerTool({
+      computer: fakeComputer,
+      customDataExtractor: (context) => {
+        (context.toolCall as any).sdkOnly = { traceId: 'sdk-only' };
+        context.toolCall.action = {
+          type: 'click',
+          button: 'left',
+          x: 1,
+          y: 2,
+        } as any;
+        return { annotatedCall: context.toolCall };
+      },
+    });
+    const call: protocol.ComputerUseCallItem = {
+      type: 'computer_call',
+      callId: 'c1_cloned_custom_data',
+      status: 'completed',
+      action: { type: 'screenshot' } as any,
+    };
+
+    const items = await executeComputerActions(
+      new Agent({ name: 'Comp' }),
+      [{ toolCall: call, computer: tool }],
+      new Runner(),
+      new RunContext(),
+    );
+
+    expect((call as any).sdkOnly).toBeUndefined();
+    expect(call.action).toEqual({ type: 'screenshot' });
+    expect(items[0]).toBeInstanceOf(ToolCallOutputItem);
+    expect((items[0] as ToolCallOutputItem).customData).toEqual({
+      annotatedCall: {
+        ...call,
+        action: {
+          type: 'click',
+          button: 'left',
+          x: 1,
+          y: 2,
+        },
+        sdkOnly: { traceId: 'sdk-only' },
+      },
+    });
+  });
+
   it('emits a function span for computer actions', async () => {
     const fakeComputer = {
       environment: 'mac',
