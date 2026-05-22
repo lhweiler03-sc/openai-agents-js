@@ -1075,19 +1075,6 @@ export async function executeApplyPatchOperations(
           _logger.error('Failed to execute apply_patch operation:', err);
         }
 
-        emitToolEnd(
-          runner,
-          runContext,
-          agent,
-          applyPatchTool,
-          output,
-          toolCall,
-        );
-
-        if (span && runner.config.traceIncludeSensitiveData) {
-          span.spanData.output = output;
-        }
-
         const rawItem: protocol.ApplyPatchCallResultItem = {
           type: 'apply_patch_call_output',
           callId: toolCallKey,
@@ -1109,6 +1096,19 @@ export async function executeApplyPatchOperations(
             rawItem: cloneForCustomDataContext(rawItem),
           } satisfies ApplyPatchToolCustomDataContext,
         );
+
+        emitToolEnd(
+          runner,
+          runContext,
+          agent,
+          applyPatchTool,
+          output,
+          toolCall,
+        );
+
+        if (span && runner.config.traceIncludeSensitiveData) {
+          span.spanData.output = output;
+        }
 
         return new RunToolCallOutputItem(rawItem, agent, output, customData);
       },
@@ -1274,14 +1274,8 @@ export async function executeComputerActions(
           });
         }
 
-        // Hooks: on_tool_end (global + agent)
-        emitToolEnd(runner, runContext, agent, computerTool, output, toolCall);
-
         // Return the screenshot as a data URL when available; fall back to an empty string on failures.
         const imageUrl = output ? `data:image/png;base64,${output}` : '';
-        if (span && runner.config.traceIncludeSensitiveData) {
-          span.spanData.output = imageUrl;
-        }
         const rawItem: protocol.ComputerCallResultItem = {
           type: 'computer_call_result',
           callId: toolCall.callId,
@@ -1302,6 +1296,14 @@ export async function executeComputerActions(
             rawItem: cloneForCustomDataContext(rawItem),
           } satisfies ComputerToolCustomDataContext,
         );
+
+        // Hooks: on_tool_end (global + agent)
+        emitToolEnd(runner, runContext, agent, computerTool, output, toolCall);
+
+        if (span && runner.config.traceIncludeSensitiveData) {
+          span.spanData.output = imageUrl;
+        }
+
         return new RunToolCallOutputItem(rawItem, agent, imageUrl, customData);
       },
     );

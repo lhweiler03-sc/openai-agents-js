@@ -699,6 +699,46 @@ describe('executeComputerActions', () => {
     expect((items[0] as any).output).toBe('data:image/png;base64,img');
   });
 
+  it('does not emit a success end event when computer customDataExtractor fails', async () => {
+    const fakeComputer = {
+      environment: 'mac',
+      dimensions: [1, 1] as [number, number],
+      screenshot: vi.fn().mockResolvedValue('img'),
+      click: vi.fn(),
+      doubleClick: vi.fn(),
+      drag: vi.fn(),
+      keypress: vi.fn(),
+      move: vi.fn(),
+      scroll: vi.fn(),
+      type: vi.fn(),
+      wait: vi.fn(),
+    } as any;
+    const tool = computerTool({
+      computer: fakeComputer,
+      customDataExtractor: () => ({ bad: BigInt(1) }) as any,
+    });
+    const call: protocol.ComputerUseCallItem = {
+      type: 'computer_call',
+      callId: 'c1_bad_custom_data',
+      status: 'completed',
+      action: { type: 'screenshot' } as any,
+    };
+    const runner = new Runner();
+    const end = vi.fn();
+    runner.on('agent_tool_end', end);
+
+    await expect(
+      executeComputerActions(
+        new Agent({ name: 'Comp' }),
+        [{ toolCall: call, computer: tool }],
+        runner,
+        new RunContext(),
+      ),
+    ).rejects.toThrow(/customDataExtractor must return JSON-compatible data/);
+
+    expect(end).not.toHaveBeenCalled();
+  });
+
   it('emits a function span for computer actions', async () => {
     const fakeComputer = {
       environment: 'mac',
@@ -1745,6 +1785,41 @@ describe('executeShellActions', () => {
       const rawItem = results[0].rawItem as protocol.ApplyPatchCallResultItem;
       expect(rawItem.status).toBe('completed');
       expect(rawItem.output).toBeUndefined();
+      expect(editor.operations).toHaveLength(1);
+    });
+
+    it('does not emit a success end event when apply_patch customDataExtractor fails', async () => {
+      const editor = new FakeEditor();
+      const applyPatch = applyPatchTool({
+        editor,
+        customDataExtractor: () => ({ bad: BigInt(1) }) as any,
+      });
+      const agent = new Agent({ name: 'EditorAgent' });
+      const runContext = new RunContext();
+      const runner = new Runner({ tracingDisabled: true });
+      const end = vi.fn();
+      runner.on('agent_tool_end', end);
+      const toolCall: protocol.ApplyPatchCallItem = {
+        type: 'apply_patch_call',
+        callId: 'call_patch_bad_custom_data',
+        status: 'completed',
+        operation: {
+          type: 'update_file',
+          path: 'README.md',
+          diff: 'diff --git',
+        },
+      };
+
+      await expect(
+        executeApplyPatchOperations(
+          agent,
+          [{ toolCall, applyPatch } as any],
+          runner,
+          runContext,
+        ),
+      ).rejects.toThrow(/customDataExtractor must return JSON-compatible data/);
+
+      expect(end).not.toHaveBeenCalled();
       expect(editor.operations).toHaveLength(1);
     });
 
