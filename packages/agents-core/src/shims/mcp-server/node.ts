@@ -18,6 +18,7 @@ import {
   MCPServerStreamableHttpOptions,
   MCPServerSSEOptions,
   MCPTool,
+  attachCallToolResultMetadata,
   invalidateServerToolsCache,
 } from '../../mcp';
 import logger from '../../logger';
@@ -290,7 +291,11 @@ export class NodeMCPServerStdio extends BaseMCPServerStdio {
       requestOptions,
     );
     const parsed = CallToolResultSchema.parse(response);
-    const result = parsed.content;
+    const result = attachCallToolResultMetadata(parsed.content, {
+      _meta: parsed._meta,
+      structuredContent: parsed.structuredContent,
+      isError: parsed.isError,
+    });
     this.debugLog(
       () =>
         `Called tool ${toolName} (args: ${JSON.stringify(args)}, result: ${JSON.stringify(result)})`,
@@ -493,7 +498,11 @@ export class NodeMCPServerSSE extends BaseMCPServerSSE {
       requestOptions,
     );
     const parsed = CallToolResultSchema.parse(response);
-    const result = parsed.content;
+    const result = attachCallToolResultMetadata(parsed.content, {
+      _meta: parsed._meta,
+      structuredContent: parsed.structuredContent,
+      isError: parsed.isError,
+    });
     this.debugLog(
       () =>
         `Called tool ${toolName} (args: ${JSON.stringify(args)}, result: ${JSON.stringify(result)})`,
@@ -887,7 +896,11 @@ export class NodeMCPServerStreamableHttp extends BaseMCPServerStreamableHttp {
     };
     const response = await client.callTool(params, undefined, requestOptions);
     const parsed = CallToolResultSchema.parse(response);
-    return parsed.content as CallToolResultContent;
+    return attachCallToolResultMetadata(parsed.content, {
+      _meta: parsed._meta,
+      structuredContent: parsed.structuredContent,
+      isError: parsed.isError,
+    });
   }
 
   private async closeStreamableHttpClient(

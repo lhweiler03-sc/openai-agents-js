@@ -1,4 +1,4 @@
-import { FunctionTool, tool, Tool } from './tool';
+import { FunctionTool, tool, Tool, type ToolCallDetails } from './tool';
 import { UserError } from './errors';
 import {
   MCPServerStdio as UnderlyingMCPServerStdio,
@@ -22,6 +22,8 @@ import {
   UnknownContext,
 } from './types';
 import type {
+  MCPToolCustomDataContext,
+  MCPToolCustomDataExtractor,
   MCPToolFilterCallable,
   MCPToolFilterStatic,
   MCPToolMetaContext,
@@ -29,6 +31,7 @@ import type {
 } from './mcpUtil';
 import type { RunContext } from './runContext';
 import type { Agent } from './agent';
+import { maybeExtractToolOutputCustomData } from './utils/customData';
 
 export const DEFAULT_STDIO_MCP_CLIENT_LOGGER_NAME =
   'openai-agents:stdio-mcp-client';
@@ -64,6 +67,7 @@ export interface MCPServer {
   cacheToolsList: boolean;
   toolFilter?: MCPToolFilterCallable | MCPToolFilterStatic;
   toolMetaResolver?: MCPToolMetaResolver;
+  customDataExtractor?: MCPToolCustomDataExtractor;
   /**
    * Optional function to convert MCP tool failures into model-visible messages.
    * Set to null to rethrow errors instead of converting them.
@@ -184,6 +188,7 @@ export abstract class BaseMCPServerStdio implements MCPServer {
   protected _cachedTools: any[] | undefined = undefined;
   public toolFilter?: MCPToolFilterCallable | MCPToolFilterStatic;
   public toolMetaResolver?: MCPToolMetaResolver;
+  public customDataExtractor?: MCPToolCustomDataExtractor;
   public errorFunction?: MCPToolErrorFunction | null;
 
   protected logger: Logger;
@@ -193,6 +198,7 @@ export abstract class BaseMCPServerStdio implements MCPServer {
     this.cacheToolsList = options.cacheToolsList ?? false;
     this.toolFilter = options.toolFilter;
     this.toolMetaResolver = options.toolMetaResolver;
+    this.customDataExtractor = options.customDataExtractor;
     this.errorFunction = options.errorFunction;
   }
 
@@ -231,6 +237,7 @@ export abstract class BaseMCPServerStreamableHttp implements MCPServer {
   protected _cachedTools: any[] | undefined = undefined;
   public toolFilter?: MCPToolFilterCallable | MCPToolFilterStatic;
   public toolMetaResolver?: MCPToolMetaResolver;
+  public customDataExtractor?: MCPToolCustomDataExtractor;
   public errorFunction?: MCPToolErrorFunction | null;
 
   protected logger: Logger;
@@ -241,6 +248,7 @@ export abstract class BaseMCPServerStreamableHttp implements MCPServer {
     this.cacheToolsList = options.cacheToolsList ?? false;
     this.toolFilter = options.toolFilter;
     this.toolMetaResolver = options.toolMetaResolver;
+    this.customDataExtractor = options.customDataExtractor;
     this.errorFunction = options.errorFunction;
   }
 
@@ -280,6 +288,7 @@ export abstract class BaseMCPServerSSE implements MCPServer {
   protected _cachedTools: any[] | undefined = undefined;
   public toolFilter?: MCPToolFilterCallable | MCPToolFilterStatic;
   public toolMetaResolver?: MCPToolMetaResolver;
+  public customDataExtractor?: MCPToolCustomDataExtractor;
   public errorFunction?: MCPToolErrorFunction | null;
 
   protected logger: Logger;
@@ -289,6 +298,7 @@ export abstract class BaseMCPServerSSE implements MCPServer {
     this.cacheToolsList = options.cacheToolsList ?? false;
     this.toolFilter = options.toolFilter;
     this.toolMetaResolver = options.toolMetaResolver;
+    this.customDataExtractor = options.customDataExtractor;
     this.errorFunction = options.errorFunction;
   }
 
@@ -1103,6 +1113,10 @@ export function mcpToFunctionTool(
   options: MCPFunctionToolConversionOptions = {},
 ) {
   const toolName = options.toolNameOverride ?? mcpTool.name;
+  const customDataByCall = new WeakMap<
+    RunContext<any>,
+    Map<string, MCPToolCustomDataContext<any>>
+  >();
   const serverErrorFunction = server.errorFunction;
   const mcpErrorFunction =
     serverErrorFunction !== undefined
@@ -1113,7 +1127,11 @@ export function mcpToFunctionTool(
       ? (context: RunContext, error: Error | unknown) =>
           mcpErrorFunction({ context, error })
       : mcpErrorFunction;
-  async function invoke(input: any, runContext?: RunContext<any>) {
+  async function invoke(
+    input: any,
+    runContext?: RunContext<any>,
+    details?: ToolCallDetails,
+  ) {
     let args = {};
     if (typeof input === 'string' && input) {
       args = JSON.parse(input);
@@ -1131,7 +1149,28 @@ export function mcpToFunctionTool(
       meta === undefined
         ? await server.callTool(mcpTool.name, args)
         : await server.callTool(mcpTool.name, args, meta);
-    return content.length === 1 ? content[0] : content;
+    const toolOutput = content.length === 1 ? content[0] : content;
+    if (runContext && details?.toolCall?.callId) {
+      let byCall = customDataByCall.get(runContext);
+      if (!byCall) {
+        byCall = new Map();
+        customDataByCall.set(runContext, byCall);
+      }
+      byCall.set(details.toolCall.callId, {
+        runContext,
+        serverName: server.name,
+        toolName: mcpTool.name,
+        toolDisplayName: toolName,
+        arguments: cloneMcpCustomDataContextValue(args),
+        resultMeta: cloneMcpCustomDataContextValue(content._meta),
+        structuredContent: cloneMcpCustomDataContextValue(
+          content.structuredContent,
+        ),
+        isError: content.isError,
+        toolOutput: cloneMcpCustomDataContextValue(toolOutput),
+      });
+    }
+    return toolOutput;
   }
 
   const schema: JsonObjectSchema<any> = {
@@ -1152,6 +1191,19 @@ export function mcpToFunctionTool(
         strict: true,
         execute: invoke,
         errorFunction,
+        customDataExtractor: async (context) => {
+          const mcpContext = getMcpCustomDataContext(
+            customDataByCall,
+            context.runContext,
+            context.toolCall.callId,
+          );
+          return mcpContext
+            ? maybeExtractToolOutputCustomData(
+                server.customDataExtractor,
+                mcpContext,
+              )
+            : undefined;
+        },
       });
     } catch (e) {
       globalLogger.warn(`Error converting MCP schema to strict mode: ${e}`);
@@ -1169,7 +1221,42 @@ export function mcpToFunctionTool(
     strict: false,
     execute: invoke,
     errorFunction,
+    customDataExtractor: async (context) => {
+      const mcpContext = getMcpCustomDataContext(
+        customDataByCall,
+        context.runContext,
+        context.toolCall.callId,
+      );
+      return mcpContext
+        ? maybeExtractToolOutputCustomData(
+            server.customDataExtractor,
+            mcpContext,
+          )
+        : undefined;
+    },
   });
+}
+
+function getMcpCustomDataContext(
+  contexts: WeakMap<
+    RunContext<any>,
+    Map<string, MCPToolCustomDataContext<any>>
+  >,
+  runContext: RunContext<any>,
+  callId: string,
+): MCPToolCustomDataContext<any> | undefined {
+  const byCall = contexts.get(runContext);
+  const context = byCall?.get(callId);
+  byCall?.delete(callId);
+  return context;
+}
+
+function cloneMcpCustomDataContextValue<T>(value: T): T {
+  try {
+    return structuredClone(value);
+  } catch {
+    return value;
+  }
 }
 
 /**
@@ -1208,6 +1295,10 @@ export interface BaseMCPServerStdioOptions {
    */
   toolMetaResolver?: MCPToolMetaResolver;
   /**
+   * Optional callback that attaches SDK-only custom data to local MCP tool output items.
+   */
+  customDataExtractor?: MCPToolCustomDataExtractor;
+  /**
    * Optional function to convert MCP tool failures into model-visible messages.
    * Set to null to rethrow errors instead of converting them.
    */
@@ -1237,6 +1328,10 @@ export interface MCPServerStreamableHttpOptions {
    * Invoked before calling `callTool`.
    */
   toolMetaResolver?: MCPToolMetaResolver;
+  /**
+   * Optional callback that attaches SDK-only custom data to local MCP tool output items.
+   */
+  customDataExtractor?: MCPToolCustomDataExtractor;
   /**
    * Optional function to convert MCP tool failures into model-visible messages.
    * Set to null to rethrow errors instead of converting them.
@@ -1271,6 +1366,10 @@ export interface MCPServerSSEOptions {
    * Invoked before calling `callTool`.
    */
   toolMetaResolver?: MCPToolMetaResolver;
+  /**
+   * Optional callback that attaches SDK-only custom data to local MCP tool output items.
+   */
+  customDataExtractor?: MCPToolCustomDataExtractor;
   /**
    * Optional function to convert MCP tool failures into model-visible messages.
    * Set to null to rethrow errors instead of converting them.
@@ -1323,11 +1422,39 @@ export interface JsonRpcResponse {
 
 export interface CallToolResponse extends JsonRpcResponse {
   result: {
-    content: { type: string; text: string }[];
+    content: Array<{ type: string; [key: string]: unknown }>;
+    _meta?: Record<string, unknown>;
+    structuredContent?: Record<string, unknown>;
+    isError?: boolean;
   };
 }
 export type CallToolResult = CallToolResponse['result'];
-export type CallToolResultContent = CallToolResult['content'];
+export type CallToolResultMetadata = Pick<
+  CallToolResult,
+  '_meta' | 'structuredContent' | 'isError'
+>;
+export type CallToolResultContent = CallToolResult['content'] &
+  CallToolResultMetadata;
+
+export function attachCallToolResultMetadata(
+  content: CallToolResult['content'],
+  metadata: CallToolResultMetadata,
+): CallToolResultContent {
+  const result = content as CallToolResultContent;
+  for (const [key, value] of Object.entries(metadata) as Array<
+    [keyof CallToolResultMetadata, unknown]
+  >) {
+    if (typeof value === 'undefined') {
+      continue;
+    }
+    Object.defineProperty(result, key, {
+      value,
+      enumerable: false,
+      configurable: true,
+    });
+  }
+  return result;
+}
 
 export interface InitializeResponse extends JsonRpcResponse {
   result: {

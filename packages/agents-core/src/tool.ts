@@ -38,6 +38,9 @@ import {
   ToolInputGuardrailFunction,
   ToolOutputGuardrailFunction,
 } from './toolGuardrail';
+import type { ToolOutputCustomDataExtractor } from './utils/customData';
+
+export type { ToolOutputCustomData } from './utils/customData';
 
 export type {
   ToolOutputText,
@@ -70,6 +73,57 @@ export type ToolCallDetails = {
    */
   parentRunConfig?: Partial<RunConfig>;
 };
+
+export type FunctionToolCustomDataContext<
+  Context = UnknownContext,
+  TParameters extends ToolInputParameters = ToolInputParameters,
+  Result = unknown,
+> = {
+  runContext: RunContext<Context>;
+  tool: FunctionTool<Context, TParameters, Result>;
+  toolCall: protocol.FunctionCallItem;
+  input: unknown;
+  output: unknown;
+  rawItem: protocol.FunctionCallResultItem;
+};
+
+export type FunctionToolCustomDataExtractor<
+  Context = UnknownContext,
+  TParameters extends ToolInputParameters = ToolInputParameters,
+  Result = unknown,
+> = ToolOutputCustomDataExtractor<
+  FunctionToolCustomDataContext<Context, TParameters, Result>
+>;
+
+export type ComputerToolCustomDataContext<
+  Context = UnknownContext,
+  TComputer extends Computer = Computer,
+> = {
+  runContext: RunContext<Context>;
+  tool: ComputerTool<Context, TComputer>;
+  toolCall: protocol.ComputerUseCallItem;
+  output: string;
+  rawItem: protocol.ComputerCallResultItem;
+};
+
+export type ComputerToolCustomDataExtractor<
+  Context = UnknownContext,
+  TComputer extends Computer = Computer,
+> = ToolOutputCustomDataExtractor<
+  ComputerToolCustomDataContext<Context, TComputer>
+>;
+
+export type ApplyPatchToolCustomDataContext = {
+  runContext: RunContext;
+  tool: ApplyPatchTool;
+  operation: ApplyPatchOperation;
+  output: string;
+  status: protocol.ApplyPatchCallResultItem['status'];
+  rawItem: protocol.ApplyPatchCallResultItem;
+};
+
+export type ApplyPatchToolCustomDataExtractor =
+  ToolOutputCustomDataExtractor<ApplyPatchToolCustomDataContext>;
 
 export type FunctionToolTimeoutBehavior = 'error_as_result' | 'raise_exception';
 
@@ -293,6 +347,15 @@ export type FunctionTool<
    * Guardrails that run after the tool executes.
    */
   outputGuardrails?: ToolOutputGuardrailDefinition<Context>[];
+
+  /**
+   * Optional callback that attaches SDK-only custom data to the emitted tool output item.
+   */
+  customDataExtractor?: FunctionToolCustomDataExtractor<
+    Context,
+    TParameters,
+    Result
+  >;
 };
 
 /**
@@ -426,6 +489,11 @@ export type ComputerTool<
    * Optional handler to acknowledge pending safety checks.
    */
   onSafetyCheck?: ComputerOnSafetyCheckFunction;
+
+  /**
+   * Optional callback that attaches SDK-only custom data to the emitted tool output item.
+   */
+  customDataExtractor?: ComputerToolCustomDataExtractor<Context, TComputer>;
 };
 
 /**
@@ -442,6 +510,7 @@ export function computerTool<
   computer: ComputerConfig<Context, TComputer>;
   needsApproval?: boolean | ComputerApprovalFunction;
   onSafetyCheck?: ComputerOnSafetyCheckFunction;
+  customDataExtractor?: ComputerToolCustomDataExtractor<Context, TComputer>;
 }): ComputerTool<Context, TComputer> {
   if (!options.computer) {
     throw new UserError(
@@ -463,6 +532,7 @@ export function computerTool<
     computer: options.computer,
     needsApproval,
     onSafetyCheck: options.onSafetyCheck,
+    customDataExtractor: options.customDataExtractor,
   };
 
   if (
@@ -867,6 +937,11 @@ export type ApplyPatchTool = {
    * Optional handler to auto-approve or reject when approval is required.
    */
   onApproval?: ApplyPatchOnApprovalFunction;
+
+  /**
+   * Optional callback that attaches SDK-only custom data to the emitted tool output item.
+   */
+  customDataExtractor?: ApplyPatchToolCustomDataExtractor;
 };
 
 export function applyPatchTool(
@@ -876,6 +951,7 @@ export function applyPatchTool(
     editor: Editor;
     needsApproval?: boolean | ApplyPatchApprovalFunction;
     onApproval?: ApplyPatchOnApprovalFunction;
+    customDataExtractor?: ApplyPatchToolCustomDataExtractor;
   },
 ): ApplyPatchTool {
   const needsApproval: ApplyPatchApprovalFunction =
@@ -892,6 +968,7 @@ export function applyPatchTool(
     editor: options.editor,
     needsApproval,
     onApproval: options.onApproval,
+    customDataExtractor: options.customDataExtractor,
   };
 }
 
@@ -1427,6 +1504,11 @@ type StrictToolOptions<
    * Optional formatter used for timeout messages when timeoutBehavior is `error_as_result`.
    */
   timeoutErrorFunction?: ToolTimeoutErrorFunction<Context>;
+
+  /**
+   * Optional callback that attaches SDK-only custom data to the emitted tool output item.
+   */
+  customDataExtractor?: FunctionToolCustomDataExtractor<Context>;
 };
 
 /**
@@ -1500,6 +1582,11 @@ type NonStrictToolOptions<
    * Optional formatter used for timeout messages when timeoutBehavior is `error_as_result`.
    */
   timeoutErrorFunction?: ToolTimeoutErrorFunction<Context>;
+
+  /**
+   * Optional callback that attaches SDK-only custom data to the emitted tool output item.
+   */
+  customDataExtractor?: FunctionToolCustomDataExtractor<Context>;
 };
 
 /**
@@ -1930,6 +2017,7 @@ export function tool<
     isEnabled,
     inputGuardrails: resolveToolInputGuardrails(options.inputGuardrails),
     outputGuardrails: resolveToolOutputGuardrails(options.outputGuardrails),
+    customDataExtractor: options.customDataExtractor,
   };
 }
 
