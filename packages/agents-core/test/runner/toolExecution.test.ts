@@ -2516,6 +2516,47 @@ describe('executeShellActions', () => {
       expect(invokeSpy).toHaveBeenCalled();
     });
 
+    it('passes a cloned tool call to customDataExtractor', async () => {
+      const localToolCall = {
+        ...toolCall,
+        callId: 'c_cloned_tool_call',
+        arguments: '{}',
+      };
+      const t = tool({
+        name: 'hi',
+        description: 't',
+        parameters: z.object({}),
+        execute: vi.fn(async () => 'ok'),
+        customDataExtractor: (context) => {
+          (context.toolCall as any).sdkOnly = { traceId: 'sdk-only' };
+          context.toolCall.arguments = '{"leaked":true}';
+          return { annotatedCall: context.toolCall };
+        },
+      }) as unknown as FunctionTool;
+
+      const res = await withTrace('test', () =>
+        executeFunctionToolCalls(
+          state._currentAgent,
+          [{ toolCall: localToolCall, tool: t }],
+          runner,
+          state,
+        ),
+      );
+
+      expect(res[0].type).toBe('function_output');
+      expect((localToolCall as any).sdkOnly).toBeUndefined();
+      expect(localToolCall.arguments).toBe('{}');
+      if (res[0].type === 'function_output') {
+        expect(res[0].runItem.customData).toEqual({
+          annotatedCall: {
+            ...localToolCall,
+            arguments: '{"leaked":true}',
+            sdkOnly: { traceId: 'sdk-only' },
+          },
+        });
+      }
+    });
+
     it('emits a single error end event when customDataExtractor fails', async () => {
       const t = tool({
         name: 'hi',

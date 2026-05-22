@@ -489,7 +489,7 @@ async function runApprovedFunctionTool<TContext>(
         {
           runContext: state._context,
           tool: toolRun.tool,
-          toolCall: toolRun.toolCall,
+          toolCall: cloneForCustomDataContext(toolRun.toolCall),
           input: cloneForCustomDataContext(parsedInput),
           output: cloneForCustomDataContext(toolOutput),
           rawItem: cloneForCustomDataContext(rawItem),
