@@ -2441,6 +2441,50 @@ describe('executeShellActions', () => {
       expect(invokeSpy).toHaveBeenCalled();
     });
 
+    it('emits a single error end event when customDataExtractor fails', async () => {
+      const t = tool({
+        name: 'hi',
+        description: 't',
+        parameters: z.object({}),
+        execute: vi.fn(async () => 'ok'),
+        customDataExtractor: () => ({ bad: BigInt(1) }) as any,
+      }) as unknown as FunctionTool;
+      const start = vi.fn();
+      const end = vi.fn();
+      runner.on('agent_tool_start', start);
+      runner.on('agent_tool_end', end);
+
+      await expect(
+        withTrace('test', () =>
+          executeFunctionToolCalls(
+            state._currentAgent,
+            [{ toolCall, tool: t }],
+            runner,
+            state,
+          ),
+        ),
+      ).rejects.toThrow(/customDataExtractor must return JSON-compatible data/);
+
+      expect(start).toHaveBeenCalledTimes(1);
+      expect(end).toHaveBeenCalledTimes(1);
+      expect(end).toHaveBeenCalledWith(
+        state._context,
+        state._currentAgent,
+        t,
+        expect.stringContaining(
+          'customDataExtractor must return JSON-compatible data',
+        ),
+        { toolCall },
+      );
+      expect(end).not.toHaveBeenCalledWith(
+        state._context,
+        state._currentAgent,
+        t,
+        'ok',
+        { toolCall },
+      );
+    });
+
     it('starts all function tool calls by default', async () => {
       let activeCount = 0;
       let maxSeenCount = 0;

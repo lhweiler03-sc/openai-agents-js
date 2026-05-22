@@ -483,19 +483,6 @@ async function runApprovedFunctionTool<TContext>(
       }
       const stringResult = toSmartString(toolOutput);
 
-      emitToolEnd(
-        runner,
-        state._context,
-        agent,
-        toolRun.tool,
-        stringResult,
-        toolRun.toolCall,
-      );
-
-      if (span && runner.config.traceIncludeSensitiveData) {
-        span.spanData.output = stringResult;
-      }
-
       const rawItem = getToolCallOutputItem(toolRun.toolCall, toolOutput);
       const customData = await maybeExtractToolOutputCustomData(
         toolRun.tool.customDataExtractor,
@@ -508,6 +495,19 @@ async function runApprovedFunctionTool<TContext>(
           rawItem: cloneForCustomDataContext(rawItem),
         } satisfies FunctionToolCustomDataContext<TContext>,
       );
+
+      emitToolEnd(
+        runner,
+        state._context,
+        agent,
+        toolRun.tool,
+        stringResult,
+        toolRun.toolCall,
+      );
+
+      if (span && runner.config.traceIncludeSensitiveData) {
+        span.spanData.output = stringResult;
+      }
 
       const functionResult: FunctionToolResult<TContext> = {
         type: 'function_output' as const,
